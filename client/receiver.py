@@ -10,27 +10,54 @@ class ActionExecutor(kuro_pb2_grpc.ClientExecutorServicer):
     Executes ID-mapped actions from an allow-list.
     """
     def __init__(self):
-        # The Action Allow-list: Maps IDs to bash templates or Python functions
-        self.allow_list = {
-            "FS_LS": ["ls", "-la"],
-            "FS_MOVE": ["mv"], # Requires validation of args
-            "SYS_STAT": ["uptime"],
+        import os
+        from pathlib import Path
+        self.sandbox_path = Path.home() / "kuro_sandbox"
+        self.sandbox_path.mkdir(exist_ok=True)
+        
+        # The Action Allow-list: Maps IDs to handler methods
+        self.handlers = {
+            "FS_READ": self._fs_read,
+            "FS_LIST": self._fs_list,
         }
 
     def ExecuteAction(self, request, context):
         action_id = request.action_id
-        if action_id not in self.allow_list:
-            return kuro_pb2.ActionResponse(success=False, error="Action ID not in allow-list.")
+        if action_id not in self.handlers:
+            return kuro_pb2.ActionResponse(success=False, error=f"Action ID '{action_id}' not in client allow-list.")
         
-        # Execute the mapped action (Security: No raw shell)
-        cmd = self.allow_list[action_id]
+        params = request.params
+        return self.handlers[action_id](params)
+
+    def _fs_read(self, params):
+        path_str = params.get("path")
+        if not path_str:
+             return kuro_pb2.ActionResponse(success=False, error="Missing 'path' parameter.")
         
-        # In a real app, we'd carefully sanitise and append params
+        # Security: Enforce sandbox and file extension
+        from pathlib import Path
+        target = (self.sandbox_path / path_str).resolve()
+        if not target.exists() or not target.is_file():
+            return kuro_pb2.ActionResponse(success=False, error=f"File not found: {path_str}")
+        
+        if not str(target).startswith(str(self.sandbox_path)):
+            return kuro_pb2.ActionResponse(success=False, error="Sandbox violation: Path is outside allowed directory.")
+        
+        if target.suffix != ".txt":
+            return kuro_pb2.ActionResponse(success=False, error="Access denied: Only .txt files permitted.")
+
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            return kuro_pb2.ActionResponse(success=True, output=result.stdout)
-        except subprocess.CalledProcessError as e:
-            return kuro_pb2.ActionResponse(success=False, error=e.stderr)
+            with open(target, 'r') as f:
+                return kuro_pb2.ActionResponse(success=True, output=f.read())
+        except Exception as e:
+            return kuro_pb2.ActionResponse(success=False, error=str(e))
+
+    def _fs_list(self, params):
+        try:
+            files = [f.name for f in self.sandbox_path.glob("*.txt")]
+            return kuro_pb2.ActionResponse(success=True, output="\n".join(files) if files else "Sandbox is empty.")
+        except Exception as e:
+            return kuro_pb2.ActionResponse(success=False, error=str(e))
 
     def RequestConfirmation(self, request, context):
         print(f"\n[KURO SAFETY] Confirmation Required: {request.message}")
