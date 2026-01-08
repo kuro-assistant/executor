@@ -1,4 +1,7 @@
 import grpc
+import os
+import sys
+sys.path.append(os.getcwd())
 from concurrent import futures
 import subprocess
 from common.proto import kuro_pb2
