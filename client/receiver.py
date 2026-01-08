@@ -2,7 +2,15 @@ import grpc
 import os
 import sys
 sys.path.append(os.getcwd())
+sys.stdout.reconfigure(line_buffering=True)
+import logging
 from concurrent import futures
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("Executor")
 import subprocess
 from common.proto import kuro_pb2
 from common.proto import kuro_pb2_grpc
@@ -71,7 +79,7 @@ class ActionExecutor(kuro_pb2_grpc.ClientExecutorServicer):
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=5))
     kuro_pb2_grpc.add_ClientExecutorServicer_to_server(ActionExecutor(), server)
-    server.add_insecure_port('[::]:50054')
+    server.add_insecure_port('0.0.0.0:50054')
     print("Client Executor starting on port 50054...")
     server.start()
     server.wait_for_termination()
